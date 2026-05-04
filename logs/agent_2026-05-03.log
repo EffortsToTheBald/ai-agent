@@ -1,0 +1,6 @@
+2026-05-03 13:00:06,599 - agent - INFO - vector_store.py:68 - file /home/tdohs/agent/ai-agent/data/选购指南.txt has been loaded before, skip it
+2026-05-03 13:00:06,599 - agent - INFO - vector_store.py:68 - file /home/tdohs/agent/ai-agent/data/扫拖一体机器人100问.txt has been loaded before, skip it
+2026-05-03 13:00:06,599 - agent - INFO - vector_store.py:68 - file /home/tdohs/agent/ai-agent/data/故障排除.txt has been loaded before, skip it
+2026-05-03 13:00:06,599 - agent - INFO - vector_store.py:68 - file /home/tdohs/agent/ai-agent/data/扫地机器人100问2.txt has been loaded before, skip it
+2026-05-03 13:00:06,600 - agent - INFO - vector_store.py:68 - file /home/tdohs/agent/ai-agent/data/扫地机器人100问.pdf has been loaded before, skip it
+2026-05-03 13:00:06,600 - agent - INFO - vector_store.py:68 - file /home/tdohs/agent/ai-agent/data/维护保养.txt has been loaded before, skip it
