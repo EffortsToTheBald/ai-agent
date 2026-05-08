@@ -2,3 +2,4 @@ ai-agent-venv/
 
 */__pycache__/
 *.pyc
+*.log

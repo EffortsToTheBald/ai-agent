@@ -1,10 +1,13 @@
 collection_name: agent
 persist_directory: chroma_db
-k: 3
+# Phase 1.4: 将 k 从 3 提升到 5，增加检索召回量
+k: 5
 data_path: data
 md5_hex_store: md5.txt
 allow_knowledge_file_type: ["txt","pdf"]
 
-chunk_size: 200
-chunk_overlap: 20
+# Phase 1.4: 将 chunk_size 从 200 提升到 500，避免语义割裂
+# 200 太小会导致上下文不完整，500-800 是推荐范围
+chunk_size: 500
+chunk_overlap: 50
 separator: ["\n", "\n\n",". ", "?", "!","，。","？","！",""," "]
