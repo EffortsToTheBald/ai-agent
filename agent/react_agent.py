@@ -1,4 +1,5 @@
 from langchain.agents import create_agent
+from langchain_core.messages import AIMessage, AIMessageChunk
 from model.factory import chat_model
 from utils.prompt_loader import load_system_prompt
 from agent.tool.agent_tools import (rag_summarize, get_weather, get_user_location,
@@ -11,9 +12,9 @@ class ReactAgent:
     """
     ReAct Agent 封装类
 
-    优化说明：
-    - excute_stream 只输出最终回答，过滤中间思考过程（Thought/Action/Observation）
-    - 中间过程通过 logger 记录，方便调试但不暴露给用户
+    使用 stream_mode="messages" 实现流式输出：
+    - 过滤中间工具调用阶段的消息（tool_calls / tool_call_chunks）
+    - 只 yield 最终回答的文本内容给前端
     """
     def __init__(self):
         self.agent = create_agent(
@@ -28,10 +29,9 @@ class ReactAgent:
         """
         执行 Agent 并流式输出最终回答。
 
-        关键优化：过滤中间思考过程
-        - ReAct Agent 会产出多轮 Thought/Action/Observation 消息
-        - 只有最后一条 AIMessage 才是给用户的最终回答
-        - 中间过程记录到日志，不 yield 给前端
+        使用 stream_mode="messages"：
+        - 过滤 AIMessage/AIMessageChunk 中的 tool_calls / tool_call_chunks
+        - 只有最终回答的文本内容才 yield 给前端
         """
         input_dict = {
             "messages": [
@@ -39,31 +39,18 @@ class ReactAgent:
             ]
         }
 
-        final_answer = ""
-        for chunk in self.agent.stream(input_dict, stream_mode="values", context={"report": False}):
-            latest_message = chunk["messages"][-1]
-            content = latest_message.content
-
-            if not content:
+        for msg_chunk, metadata in self.agent.stream(
+            input_dict, stream_mode="messages", context={"report": False}
+        ):
+            if not isinstance(msg_chunk, (AIMessage, AIMessageChunk)):
                 continue
 
-            # 判断是否为最终回答：跳过中间思考过程
-            # 中间思考通常包含工具调用特征（如"我需要"、"让我"、"首先"等开头的推理）
-            # 最终回答是完整的、面向用户的回复
-            msg_type = type(latest_message).__name__
+            tool_calls = getattr(msg_chunk, 'tool_calls', None) or []
+            tool_call_chunks = getattr(msg_chunk, 'tool_call_chunks', None) or []
+            if tool_calls or tool_call_chunks:
+                logger.debug("Agent 中间思考阶段，跳过")
+                continue
 
-            # 如果消息类型是 AIMessage 且没有 tool_calls，说明是最终回答
-            if msg_type == "AIMessage":
-                # 检查是否有工具调用（有则为中间思考，无则为最终回答）
-                has_tool_calls = hasattr(latest_message, 'tool_calls') and latest_message.tool_calls
-                if has_tool_calls:
-                    # 中间思考过程，记录日志但不输出给用户
-                    logger.debug(f"Agent 中间思考: {content[:100]}...")
-                    continue
-
-                # 最终回答，输出给用户
-                final_answer = content.strip()
-
-        # 只 yield 最终回答
-        if final_answer:
-            yield final_answer
+            content = msg_chunk.content or ''
+            if content:
+                yield content

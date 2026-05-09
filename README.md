@@ -7,7 +7,7 @@
 本项目是一个中文智能客服 Chatbot，采用 **ReAct（推理+行动）Agent** 架构，结合 **RAG（检索增强生成）** 技术，通过流式输出为用户提供即时的智能对话体验。系统支持知识库问答、工具调用、动态 Prompt 切换、用户数据报告生成等能力。
 
 ## UI 界面
-![alt text](./assets/UI.png)
+![alt text](./assets/UI_0509.png)
 
 ## 技术架构
 
@@ -17,6 +17,7 @@ flowchart TD
         A["聊天界面"]
         B["流式渲染"]
         C["会话状态管理"]
+        AU["用户认证 / 多用户体系"]
     end
 
     subgraph Agent["ReactAgent (LangChain)"]
@@ -27,10 +28,10 @@ flowchart TD
 
     subgraph Tools["工具层"]
         T1["rag_summarize<br/>RAG 知识问答"]
-        T2["get_weather<br/>天气查询(Mock)"]
-        T3["get_user_location<br/>用户位置(Mock)"]
+        T2["get_weather<br/>天气查询(wttr.in)"]
+        T3["get_user_location<br/>用户位置(IP定位)"]
         T4["get_user_id<br/>用户ID(Mock)"]
-        T5["get_current_month<br/>当前月份(Mock)"]
+        T5["get_current_month<br/>当前月份(datetime)"]
         T6["fetch_external_data<br/>外部数据查询"]
         T7["fill_context_for_report<br/>上下文标记"]
     end
@@ -53,6 +54,7 @@ flowchart TD
         DB3["用户数据<br/>records.csv"]
         DB4["配置文件<br/>config/*.yaml"]
         DB5["Prompt 模板<br/>prompts/*.txt"]
+        DB6["SQLite<br/>用户 & 会话历史"]
     end
 
     subgraph Model["模型层"]
@@ -61,6 +63,7 @@ flowchart TD
     end
 
     A --> D
+    AU --> DB6
     D --> E
     E --> T1 & T2 & T3 & T4 & T5 & T6 & T7
     D --> F
@@ -89,12 +92,12 @@ flowchart TD
     classDef data fill:#f5f5f5,stroke:#616161,stroke-width:1.5px
     classDef model fill:#e0f7fa,stroke:#00838f,stroke-width:1.5px
 
-    class UI,A,B,C ui
+    class UI,A,B,C,AU ui
     class Agent,D,E,F agent
     class Tools,T1,T2,T3,T4,T5,T6,T7 tools
     class Middleware,M1,M2,M3 middleware
     class RAG,R1,R2,R3 rag
-    class Data,DB1,DB2,DB3,DB4,DB5 data
+    class Data,DB1,DB2,DB3,DB4,DB5,DB6 data
     class Model,ML1,ML2 model
 ```
 
@@ -102,13 +105,14 @@ flowchart TD
 
 | 组件 | 路径 | 说明 |
 |------|------|------|
-| 入口 & UI | `main.py` | Streamlit 聊天界面，流式渲染 |
-| ReAct Agent | `agent/react_agent.py` | LangChain Agent，绑定工具与中间件 |
+| 入口 & UI | `main.py` | Streamlit 聊天界面，用户认证，管理后台，流式渲染 |
+| ReAct Agent | `agent/react_agent.py` | LangChain Agent，绑定工具与中间件，流式输出 |
 | 工具集 | `agent/tool/agent_tools.py` | 7 个工具（RAG/天气/位置/用户ID/月份/外部数据/上下文标记） |
 | 中间件 | `agent/tool/middleware.py` | 工具调用日志 / 模型调用前日志 / 动态 Prompt 切换 |
 | 模型工厂 | `model/factory.py` | ChatTongyi (qwen3-max) / DashScopeEmbeddings (text-embedding-v4) |
-| RAG 服务 | `rag/rag_service.py` | 检索 + 摘要生成 |
+| RAG 服务 | `rag/rag_service.py` | 检索 + 摘要生成，相似度过滤与去重 |
 | 向量存储 | `rag/vector_store.py` | ChromaDB 管理，支持 PDF/TXT 加载与 MD5 去重 |
+| 会话管理 | `utils/chat_history_manager.py` | SQLite 持久化，多用户隔离，密码哈希，角色管理 |
 | 配置中心 | `config/*.yaml` | rag / chroma / agent / prompts 配置 |
 | 提示词 | `prompts/*.txt` | 主提示词 / RAG 摘要 / 报告生成 |
 | 知识库 | `data/*.pdf`, `data/*.txt` | 产品 FAQ、故障排除、维护保养、选购指南 |
@@ -116,15 +120,15 @@ flowchart TD
 
 ## 工具说明
 
-| 工具名 | 功能 |
-|--------|------|
-| `rag_summarize` | 基于向量检索回答用户知识类问题 |
-| `get_weather` | 模拟天气查询（可扩展为真实 API） |
-| `get_user_location` | 模拟获取用户所在城市 |
-| `get_user_id` | 模拟获取用户 ID |
-| `get_current_month` | 模拟获取当前月份 |
-| `fetch_external_data` | 查询用户扫地机器人使用记录 |
-| `fill_context_for_report` | 触发中间件切换到报告生成模式 |
+| 工具名 | 功能 | 状态 |
+|--------|------|------|
+| `rag_summarize` | 基于向量检索回答用户知识类问题 | ✅ 已实现 |
+| `get_weather` | 接入 wttr.in API 获取实时天气 | ✅ 已替换 |
+| `get_user_location` | 接入 ip-api.com IP 定位获取用户城市 | ✅ 已替换 |
+| `get_user_id` | 获取用户 ID（当前 Mock，待接入认证系统） | ⏳ Mock |
+| `get_current_month` | 使用 `datetime.now()` 获取当前月份 | ✅ 已修复 |
+| `fetch_external_data` | 查询用户扫地机器人使用记录（CSV） | ⏳ 待接入数据库 |
+| `fill_context_for_report` | 触发中间件切换到报告生成模式 | ✅ 已实现 |
 
 ## 中间件
 
@@ -168,6 +172,15 @@ streamlit run main.py
 
 浏览器访问 `http://localhost:8501` 即可开始对话。
 
+### 用户体系
+
+- **注册**：在左侧边栏选择"注册"，设置用户名和密码
+- **角色**：注册时可选择"普通用户"或"管理员"
+  - 普通用户：聊天功能
+  - 管理员：聊天 + 用户管理 + 知识库管理
+- **管理员验证码**：`admin888`（注册管理员时需要）
+- **登录持久化**：登录状态通过 URL 参数保持，刷新页面无需重新登录
+
 ### 示例对话
 
 **知识问答：**
@@ -186,40 +199,45 @@ AI: [自动获取用户ID、月份，查询使用记录并生成报告]
 
 ```
 ai-agent/
-├── main.py                  # Streamlit 入口
-├── requirement.txt          # Python 依赖
-├── config/                  # YAML 配置
+├── main.py                      # Streamlit 入口，用户认证，管理后台
+├── requirement.txt              # Python 依赖
+├── config/                      # YAML 配置
 │   ├── agent.yaml
 │   ├── chroma.yaml
 │   ├── prompts.yaml
 │   └── rag.yaml
-├── prompts/                 # Prompt 模板
+├── prompts/                     # Prompt 模板
 │   ├── main_prompt.txt
 │   ├── rag_summarize.txt
 │   └── report_prompt.txt
-├── agent/                   # Agent 核心逻辑
-│   ├── react_agent.py
+├── agent/                       # Agent 核心逻辑
+│   ├── react_agent.py           # ReAct Agent，流式输出
 │   └── tool/
-│       ├── agent_tools.py
-│       └── middleware.py
-├── model/                   # 模型工厂
+│       ├── agent_tools.py       # 7 个工具实现
+│       └── middleware.py        # 3 个中间件
+├── model/                       # 模型工厂
 │   └── factory.py
-├── rag/                     # RAG 服务
-│   ├── rag_service.py
-│   └── vector_store.py
-├── utils/                   # 工具函数
+├── rag/                         # RAG 服务
+│   ├── rag_service.py           # 检索 + 摘要，相似度过滤
+│   └── vector_store.py          # ChromaDB 管理
+├── utils/                       # 工具函数
+│   ├── chat_history_manager.py  # SQLite 会话管理，多用户，密码哈希
 │   ├── config_handler.py
 │   ├── file_handler.py
 │   ├── logger_handler.py
 │   ├── path_tool.py
 │   └── prompt_loader.py
-├── data/                    # 知识库 & 外部数据
+├── data/                        # 知识库 & 外部数据
 │   ├── external/records.csv
-│   ├── 扫地机器人100问.pdf
-│   └── ...
-├── logs/                    # 运行日志
-├── chroma_db/               # 向量数据库持久化
-└── ai-agent-venv/           # 虚拟环境
+│   ├── 扫地机器人100问2.txt
+│   ├── 扫拖一体机器人100问.txt
+│   ├── 故障排除.txt
+│   ├── 维护保养.txt
+│   ├── 选购指南.txt
+│   └── chat_history.db          # SQLite 数据库（自动生成）
+├── logs/                        # 运行日志
+├── chroma_db/                   # 向量数据库持久化
+└── ai-agent-venv/               # 虚拟环境
 ```
 
 ## 优化路线图
@@ -228,97 +246,108 @@ ai-agent/
 
 ### Phase 1 - 基础完善（短期）
 
-#### 1.1 Mock 工具替换为真实服务
+#### 1.1 Mock 工具替换为真实服务 ✅
 
 当前 4 个工具均为 Mock，需替换为真实功能：
 
-| 工具 | 当前状态 | 替换方案 | 参考实现 |
-|------|---------|---------|---------|
-| `get_weather` | 硬编码字符串 | 接入和风天气/高德天气 API，基于用户真实位置返回实时天气 | `pip install qweather-sdk`，通过城市名或经纬度调用 REST API |
-| `get_user_location` | `random.choice` | 方案一：接入 IP 定位 API（如 ipinfo.io）；方案二：从 JWT token 中解析用户注册城市 | OpenAI Assistants 中的 `function calling` 模式：工具接收可选参数，缺省时自动降级 |
-| `get_user_id` | `random.choice` | 与用户认证系统集成，从 JWT token/Session 中提取 user_id | LangGraph 的 `configurable_fields`：在 `RunnableConfig` 中注入用户上下文 |
-| `get_current_month` | `random.choice` | 直接使用 `datetime.now().strftime("%Y-%m")` | 无需 Mock，一行代码即可修复 |
-| `fetch_external_data` | CSV 静态文件 | 接入 PostgreSQL/MySQL，通过 SQLAlchemy ORM 查询 | CrewAI 的工具模式：工具内部封装完整的数据访问层 |
+| 工具 | 原状态 | 当前状态 | 实现方式 |
+|------|--------|---------|---------|
+| `get_weather` | 硬编码字符串 | ✅ 已替换 | 接入 wttr.in 免费天气 API，通过城市名获取实时天气 |
+| `get_user_location` | `random.choice` | ✅ 已替换 | 接入 ip-api.com IP 定位 API，基于用户 IP 返回城市 |
+| `get_user_id` | `random.choice` | ⏳ Mock | 待接入 OAuth2/JWT 认证，从 token 中提取 user_id |
+| `get_current_month` | `random.choice` | ✅ 已修复 | `datetime.now().strftime("%Y-%m")`，返回真实当前月份 |
+| `fetch_external_data` | CSV 静态文件 | ⏳ 待优化 | 待接入 PostgreSQL/MySQL，通过 SQLAlchemy ORM 查询 |
 
-#### 1.2 流式输出修复
+#### 1.2 流式输出 ✅
 
-- `main.py` 中 `response_messages[-1]` 仅取最后一个 chunk，应改为 `"".join(response_messages)` 拼接完整回复
-- 移除 `time.sleep(0.01)` 模拟打字效果，保留真实流式渲染体验
-- 参考 LangGraph 的 `stream_mode="messages"` 实现逐 token 流式输出
+- ~~`main.py` 中 `response_messages[-1]` 仅取最后一个 chunk，应改为 `"".join(response_messages)` 拼接完整回复~~
+- ~~移除 `time.sleep(0.01)` 模拟打字效果，保留真实流式渲染体验~~
+- ✅ 参考 LangGraph 的 `stream_mode="messages"` 实现流式输出
+- ✅ 过滤中间工具调用阶段的消息（`tool_calls` / `tool_call_chunks`）
+- ✅ 只 yield 最终回答的文本内容给前端
+- ✅ Streamlit `st.write_stream` 实时渲染
 
-#### 1.3 会话历史持久化
+#### 1.3 会话历史持久化 ✅
 
-- 当前 `st.session_state["message"]` 仅存于内存，刷新即丢失
-- 接入 Redis 或 SQLite 存储对话历史，支持会话恢复与多端同步
-- 实现 `get_history(session_id)` 接口，与 `RunnableWithMessageHistory` 兼容
-- 参考 LangGraph 的 `MemorySaver` / `SqliteSaver` 实现检查点机制
+- ~~当前 `st.session_state["message"]` 仅存于内存，刷新即丢失~~
+- ✅ 使用 SQLite 存储用户、会话、消息（`utils/chat_history_manager.py`）
+- ✅ 实现 `get_history(session_id)` 接口
+- ✅ 会话自动持久化，刷新页面不丢失
+- ✅ 支持会话切换、新建、删除
+- ✅ 登录状态通过 `st.query_params` 保持，刷新无需重新登录
+- ✅ 参考 LangGraph 的 `MemorySaver` / `SqliteSaver` 实现检查点机制
 
-#### 1.4 向量检索调优
+#### 1.4 向量检索调优 ✅
 
-- `chunk_size: 200` 过小，语义易割裂，建议调至 **500-800**
-- `k: 3` 返回片段太少，建议调至 **5-8**
-- 添加 `similarity_score_threshold` 过滤低质量检索结果（阈值建议 0.6）
-- 引入 **HyDE（假设文档嵌入）**：先让 LLM 生成假设性答案，用假设答案做向量检索，显著提升召回率
-- 引入 **Multi-Query Retriever**：自动生成多个检索角度的 query，合并去重后检索
-- 引入 **Reranker**（如 Cohere/BGE-Reranker）：对检索结果二次排序，提升精确率
+- ~~`chunk_size: 200` 过小，语义易割裂，建议调至 **500-800**~~
+- ~~`k: 3` 返回片段太少，建议调至 **5-8**~~
+- ✅ 添加 `similarity_score_threshold = 0.6` 过滤低质量检索结果
+- ✅ 基于内容前 100 字符去重
+- ✅ 返回 Top 5 结果
+- ✅ 检索结果为空时返回空字符串，Agent 基于自身知识回答
+- ⏳ 引入 **HyDE（假设文档嵌入）**：先让 LLM 生成假设性答案，用假设答案做向量检索，显著提升召回率
+- ⏳ 引入 **Multi-Query Retriever**：自动生成多个检索角度的 query，合并去重后检索
+- ⏳ 引入 **Reranker**（如 Cohere/BGE-Reranker）：对检索结果二次排序，提升精确率
 
-#### 1.5 Agent 输出质量
+#### 1.5 Agent 输出质量 ✅
 
-- 参考 AutoGen 的 `ConversableAgent`，增加 **输出格式校验**：
-  - 检查回答是否包含工具返回的原始数据（泄露内部实现）
-  - 检查回答是否超出知识库范围（幻觉检测）
-- 增加 **输出长度控制**：避免过长或过短的回答
-- 增加 **语言风格一致性**：确保回答始终为中文，语气专业友好
+- ✅ 检索结果为空时不返回"未找到"等提示，避免 Agent 原样转述给用户
+- ✅ 规范化参考资料格式，避免元数据泄露
+- ⏳ 增加 **输出长度控制**：避免过长或过短的回答
+- ⏳ 增加 **语言风格一致性**：确保回答始终为中文，语气专业友好
 
 ### Phase 2 - 多用户与领域扩展（中期）
 
-#### 2.1 多用户体系
+#### 2.1 多用户体系 ✅
 
-- 接入用户认证（OAuth2 / JWT），区分用户身份
-- 每个用户拥有独立的：
-  - 对话历史（session isolation）
-  - 偏好设置（语言风格、回答长度等）
-  - 个人设备数据绑定（扫地机器人 SN 码关联）
-- 实现用户分级：普通用户 / VIP 用户 / Admin
-- 参考 OpenAI Assistants API 的 `thread` 概念：每个用户拥有独立的对话线程
+- ✅ 用户注册 / 登录，密码 SHA-256 加盐哈希存储
+- ✅ 用户角色：`admin`（管理员）/ `user`（普通用户）
+- ✅ 每个用户拥有独立的对话历史（session isolation）
+- ✅ 管理员可管理用户（修改角色、删除用户）
+- ✅ 登录状态持久化（`st.query_params`）
+- ⏳ 接入 OAuth2 / JWT 认证
+- ⏳ 偏好设置（语言风格、回答长度等）
+- ⏳ 个人设备数据绑定（扫地机器人 SN 码关联）
+- ⏳ 参考 OpenAI Assistants API 的 `thread` 概念：每个用户拥有独立的对话线程
 
 ```mermaid
 flowchart TD
-    subgraph Auth["用户认证层"]
-        A1["JWT Token"]
-        A2["用户角色: Admin / VIP / 普通"]
-        A3["设备绑定"]
+    subgraph Auth["用户认证"]
+        A1["用户名 + 密码"]
+        A2["SHA-256 加盐哈希"]
+        A3["角色: admin / user"]
     end
 
-    subgraph Session["会话管理"]
-        S1["Session Store (Redis)"]
-        S2["对话历史"]
-        S3["用户偏好"]
+    subgraph Session["会话管理 (SQLite)"]
+        S1["users 表"]
+        S2["sessions 表"]
+        S3["messages 表"]
     end
 
-    subgraph Admin["Admin 管理"]
-        AD1["知识库管理"]
-        AD2["领域配置"]
-        AD3["数据统计"]
+    subgraph Admin["Admin 功能"]
+        AD1["用户管理"]
+        AD2["知识库管理"]
     end
 
-    A1 --> S1
-    A2 --> AD1
-    A3 --> S3
+    A1 --> A2
+    A2 --> S1
+    A3 --> AD1
     S1 --> S2
+    S2 --> S3
 ```
 
-#### 2.2 Admin 知识库管理后台
+#### 2.2 Admin 知识库管理后台 ✅ 基础版
 
 参考 Dify 的知识库管理模块：
 
-- 提供 Admin Web 界面，支持：
-  - 按领域/品类上传 PDF/TXT/Word/Markdown 等知识库文件
-  - 知识库版本管理（更新/回滚/对比）
-  - 查看知识库加载状态与 MD5 去重记录
-  - 按领域隔离向量集合（ChromaDB collection 按领域划分）
-  - 支持知识条目的增删改查（CRUD），而非仅限文件级操作
-- 实现通用聊天机器人能力：
+- ✅ Admin 登录后显示管理后台
+- ✅ 用户管理：查看用户列表、修改角色、删除用户
+- ✅ 知识库管理：查看已有文件、上传 PDF/TXT/MD 文件
+- ⏳ 知识库版本管理（更新/回滚/对比）
+- ⏳ 查看知识库加载状态与 MD5 去重记录
+- ⏳ 按领域隔离向量集合（ChromaDB collection 按领域划分）
+- ⏳ 支持知识条目的增删改查（CRUD），而非仅限文件级操作
+- ⏳ 实现通用聊天机器人能力：
   - Admin 创建新领域（如 "智能家居"、"家电维修"、"汽车保养"）
   - 上传该领域资料后自动索引
   - 用户可按领域切换对话场景，或 Agent 自动识别领域路由
@@ -534,26 +563,26 @@ stateDiagram-v2
 
 | 阶段 | 任务 | 时间 | 状态 |
 |------|------|------|------|
-| **Phase 1 - 基础完善** | Mock 工具替换 | 2026-05 | Done(天气/位置) |
-| | 流式输出修复 | 2026-05 | Done |
-| | 会话历史持久化 | 2026-05 | Done |
-| | 向量检索调优 | 2026-05 | Done |
-| | Agent 输出质量 | 2026-05 | Done |
-| **Phase 2 - 多用户与领域** | 多用户体系 | 2026-06 ~ 07 | 待开始 |
-| | Admin 知识库管理 | 待定 | 待开始 |
-| | 知识库实时更新 | 待定 | 待开始 |
-| **Phase 3 - Agent 增强** | 多 Agent 协作 | 2026-08 ~ 09 | 待开始 |
-| | 记忆系统升级 | 待定 | 待开始 |
-| | 工具执行增强 | 待定 | 待开始 |
-| | Human-in-the-Loop | 待定 | 待开始 |
-| | 结构化输出 | 待定 | 待开始 |
-| **Phase 4 - 生产级** | 可观测性与评估 | 2026-10 ~ 11 | 待开始 |
-| | 多模型支持 | 待定 | 待开始 |
-| | 安全与合规 | 待定 | 待开始 |
-| | 部署与运维 | 待定 | 待开始 |
-| **Phase 5 - 架构升级** | Graph-based Agent | 2027-01 ~ 02 | 待开始 |
-| | 插件化工具系统 | 待定 | 待开始 |
-| | 多模态支持 | 待定 | 待开始 |
+| **Phase 1 - 基础完善** | Mock 工具替换 | 2026-05 | ✅ Done（天气/位置/月份） |
+| | 流式输出修复 | 2026-05 | ✅ Done |
+| | 会话历史持久化 | 2026-05 | ✅ Done |
+| | 向量检索调优 | 2026-05 | ✅ Done |
+| | Agent 输出质量 | 2026-05 | ✅ Done |
+| **Phase 2 - 多用户与领域** | 多用户体系 | 2026-05 | ✅ Done |
+| | Admin 知识库管理 | 2026-05 | ✅ Done(基础版) |
+| | 知识库实时更新 | 待定 | ⏳ 待开始 |
+| **Phase 3 - Agent 增强** | 多 Agent 协作 | 2026-08 ~ 09 | ⏳ 待开始 |
+| | 记忆系统升级 | 待定 | ⏳ 待开始 |
+| | 工具执行增强 | 待定 | ⏳ 待开始 |
+| | Human-in-the-Loop | 待定 | ⏳ 待开始 |
+| | 结构化输出 | 待定 | ⏳ 待开始 |
+| **Phase 4 - 生产级** | 可观测性与评估 | 2026-10 ~ 11 | ⏳ 待开始 |
+| | 多模型支持 | 待定 | ⏳ 待开始 |
+| | 安全与合规 | 待定 | ⏳ 待开始 |
+| | 部署与运维 | 待定 | ⏳ 待开始 |
+| **Phase 5 - 架构升级** | Graph-based Agent | 2027-01 ~ 02 | ⏳ 待开始 |
+| | 插件化工具系统 | 待定 | ⏳ 待开始 |
+| | 多模态支持 | 待定 | ⏳ 待开始 |
 
 ## License
 

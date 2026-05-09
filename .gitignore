@@ -3,3 +3,4 @@ ai-agent-venv/
 */__pycache__/
 *.pyc
 *.log
+chat_history.db
