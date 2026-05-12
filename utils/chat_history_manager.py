@@ -34,7 +34,17 @@ class ChatHistoryManager:
             db_path = get_absolute_path("data/chat_history.db")
         self.db_path = db_path
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self._ensure_writable()
         self._init_db()
+
+    def _ensure_writable(self):
+        """Ensure the database file is writable, fix permissions if needed."""
+        if os.path.exists(self.db_path):
+            if not os.access(self.db_path, os.W_OK):
+                try:
+                    os.chmod(self.db_path, 0o666)
+                except OSError:
+                    pass
 
     def _get_conn(self):
         conn = sqlite3.connect(self.db_path)
@@ -58,6 +68,7 @@ class ChatHistoryManager:
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
+                    domain TEXT DEFAULT 'default',
                     title TEXT DEFAULT '新对话',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -72,6 +83,23 @@ class ChatHistoryManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (session_id) REFERENCES sessions(id)
                 );
+
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    language_style TEXT DEFAULT '专业友好',
+                    answer_length TEXT DEFAULT '适中',
+                    current_domain TEXT DEFAULT 'default',
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS user_devices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    device_sn TEXT NOT NULL,
+                    device_name TEXT DEFAULT '',
+                    bind_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                );
             """)
             conn.commit()
             self._migrate(conn)
@@ -84,7 +112,8 @@ class ChatHistoryManager:
         columns = {row["name"] for row in cursor.fetchall()}
         if "user_id" not in columns:
             conn.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT DEFAULT ''")
-            conn.commit()
+        if "domain" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN domain TEXT DEFAULT 'default'")
 
         cursor = conn.execute("PRAGMA table_info(users)")
         user_cols = {row["name"] for row in cursor.fetchall()}
@@ -97,6 +126,7 @@ class ChatHistoryManager:
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id)")
         conn.commit()
 
     # ===== User Management =====
@@ -215,37 +245,6 @@ class ChatHistoryManager:
         finally:
             conn.close()
 
-    def get_user_sessions(self, user_id: str) -> dict[str, dict]:
-        conn = self._get_conn()
-        try:
-            rows = conn.execute(
-                """SELECT id, title, created_at, updated_at
-                   FROM sessions WHERE user_id = ?
-                   ORDER BY updated_at DESC""",
-                (user_id,)
-            ).fetchall()
-            result = {}
-            for row in rows:
-                result[row["id"]] = {
-                    "title": row["title"],
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                }
-            return result
-        finally:
-            conn.close()
-
-    def create_session(self, session_id: str, user_id: str, title: str = "新对话"):
-        conn = self._get_conn()
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO sessions (id, user_id, title) VALUES (?, ?, ?)",
-                (session_id, user_id, title)
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
     def update_session_title(self, session_id: str, title: str):
         conn = self._get_conn()
         try:
@@ -274,7 +273,112 @@ class ChatHistoryManager:
                 (user_id,)
             )
             conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+            conn.execute("DELETE FROM user_devices WHERE user_id = ?", (user_id,))
+            conn.execute("DELETE FROM user_preferences WHERE user_id = ?", (user_id,))
             conn.commit()
+        finally:
+            conn.close()
+
+    # ===== User Preferences =====
+
+    def get_preferences(self, user_id: str) -> dict:
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT * FROM user_preferences WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            if row:
+                return dict(row)
+            conn.execute(
+                "INSERT OR IGNORE INTO user_preferences (user_id) VALUES (?)", (user_id,)
+            )
+            conn.commit()
+            return {"user_id": user_id, "language_style": "专业友好", "answer_length": "适中", "current_domain": "default"}
+        finally:
+            conn.close()
+
+    def update_preferences(self, user_id: str, **kwargs):
+        conn = self._get_conn()
+        try:
+            conn.execute("INSERT OR IGNORE INTO user_preferences (user_id) VALUES (?)", (user_id,))
+            for key, value in kwargs.items():
+                if key in ("language_style", "answer_length", "current_domain"):
+                    conn.execute(f"UPDATE user_preferences SET {key} = ? WHERE user_id = ?", (value, user_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    # ===== User Devices =====
+
+    def bind_device(self, user_id: str, device_sn: str, device_name: str = ""):
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                "INSERT INTO user_devices (user_id, device_sn, device_name) VALUES (?, ?, ?)",
+                (user_id, device_sn, device_name)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def unbind_device(self, device_id: int):
+        conn = self._get_conn()
+        try:
+            conn.execute("DELETE FROM user_devices WHERE id = ?", (device_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_user_devices(self, user_id: str) -> list[dict]:
+        conn = self._get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT id, device_sn, device_name, bind_time FROM user_devices WHERE user_id = ? ORDER BY bind_time DESC",
+                (user_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ===== Domain-scoped Sessions =====
+
+    def create_session(self, session_id: str, user_id: str, title: str = "新对话", domain: str = "default"):
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO sessions (id, user_id, title, domain) VALUES (?, ?, ?, ?)",
+                (session_id, user_id, title, domain)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_user_sessions(self, user_id: str, domain: str = None) -> dict[str, dict]:
+        conn = self._get_conn()
+        try:
+            if domain:
+                rows = conn.execute(
+                    """SELECT id, title, domain, created_at, updated_at
+                       FROM sessions WHERE user_id = ? AND domain = ?
+                       ORDER BY updated_at DESC""",
+                    (user_id, domain)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT id, title, domain, created_at, updated_at
+                       FROM sessions WHERE user_id = ?
+                       ORDER BY updated_at DESC""",
+                    (user_id,)
+                ).fetchall()
+            result = {}
+            for row in rows:
+                result[row["id"]] = {
+                    "title": row["title"],
+                    "domain": row["domain"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+            return result
         finally:
             conn.close()
 
@@ -283,6 +387,8 @@ class ChatHistoryManager:
         try:
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM sessions")
+            conn.execute("DELETE FROM user_devices")
+            conn.execute("DELETE FROM user_preferences")
             conn.execute("DELETE FROM users")
             conn.commit()
         finally:

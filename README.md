@@ -6,18 +6,28 @@
 
 本项目是一个中文智能客服 Chatbot，采用 **ReAct（推理+行动）Agent** 架构，结合 **RAG（检索增强生成）** 技术，通过流式输出为用户提供即时的智能对话体验。系统支持知识库问答、工具调用、动态 Prompt 切换、用户数据报告生成等能力。
 
+提供 **两套独立前端**：
+- **Streamlit UI**（`main.py`）— 原型界面，快速迭代
+- **React + FastAPI**（`web/`）— 独立前后端，生产级架构
+
 ## UI 界面
+
 ![alt text](./assets/UI_0509.png)
 
 ## 技术架构
 
 ```mermaid
 flowchart TD
-    subgraph UI["Streamlit Web UI"]
-        A["聊天界面"]
-        B["流式渲染"]
-        C["会话状态管理"]
-        AU["用户认证 / 多用户体系"]
+    subgraph Frontends["前端层"]
+        direction LR
+        ST["Streamlit UI<br/>main.py"]
+        RA["React + Vite<br/>web/frontend/"]
+    end
+
+    subgraph Backend["FastAPI 后端 (web/backend/)"]
+        BA["Auth API<br/>注册/登录/用户管理"]
+        BC["Chat API<br/>SSE 流式对话"]
+        BM["Admin API<br/>领域/知识库/文件/系统"]
     end
 
     subgraph Agent["ReactAgent (LangChain)"]
@@ -62,8 +72,10 @@ flowchart TD
         ML2["DashScopeEmbeddings<br/>text-embedding-v4"]
     end
 
-    A --> D
-    AU --> DB6
+    ST -->|"直接调用"| Agent
+    RA -->|"HTTP / SSE"| Backend
+    Backend -->|"lazy import"| Agent
+
     D --> E
     E --> T1 & T2 & T3 & T4 & T5 & T6 & T7
     D --> F
@@ -85,6 +97,7 @@ flowchart TD
     R2 --> ML2
 
     classDef ui fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
+    classDef backend fill:#fff8e1,stroke:#f9a825,stroke-width:2px
     classDef agent fill:#fff3e0,stroke:#f57c00,stroke-width:2px
     classDef tools fill:#f3e5f5,stroke:#7b1fa2,stroke-width:1.5px
     classDef middleware fill:#e8f5e9,stroke:#388e3c,stroke-width:1.5px
@@ -92,7 +105,8 @@ flowchart TD
     classDef data fill:#f5f5f5,stroke:#616161,stroke-width:1.5px
     classDef model fill:#e0f7fa,stroke:#00838f,stroke-width:1.5px
 
-    class UI,A,B,C,AU ui
+    class Frontends,ST,RA ui
+    class Backend,BA,BC,BM backend
     class Agent,D,E,F agent
     class Tools,T1,T2,T3,T4,T5,T6,T7 tools
     class Middleware,M1,M2,M3 middleware
@@ -105,7 +119,9 @@ flowchart TD
 
 | 组件 | 路径 | 说明 |
 |------|------|------|
-| 入口 & UI | `main.py` | Streamlit 聊天界面，用户认证，管理后台，流式渲染 |
+| Streamlit 入口 | `main.py` | Streamlit 聊天界面，用户认证，管理后台，流式渲染 |
+| React 前端 | `web/frontend/` | Vite + Tailwind CSS + Lucide Icons，独立 SPA |
+| FastAPI 后端 | `web/backend/` | Auth / Chat SSE / Admin API，lazy import Agent |
 | ReAct Agent | `agent/react_agent.py` | LangChain Agent，绑定工具与中间件，流式输出 |
 | 工具集 | `agent/tool/agent_tools.py` | 7 个工具（RAG/天气/位置/用户ID/月份/外部数据/上下文标记） |
 | 中间件 | `agent/tool/middleware.py` | 工具调用日志 / 模型调用前日志 / 动态 Prompt 切换 |
@@ -113,6 +129,8 @@ flowchart TD
 | RAG 服务 | `rag/rag_service.py` | 检索 + 摘要生成，相似度过滤与去重 |
 | 向量存储 | `rag/vector_store.py` | ChromaDB 管理，支持 PDF/TXT 加载与 MD5 去重 |
 | 会话管理 | `utils/chat_history_manager.py` | SQLite 持久化，多用户隔离，密码哈希，角色管理 |
+| 知识库管理 | `utils/knowledge_manager.py` | 领域管理、知识条目 CRUD、文件跟踪 |
+| 文件监听 | `utils/file_watcher.py` | watchdog 监听 data/ 目录，新文件自动触发索引 |
 | 配置中心 | `config/*.yaml` | rag / chroma / agent / prompts 配置 |
 | 提示词 | `prompts/*.txt` | 主提示词 / RAG 摘要 / 报告生成 |
 | 知识库 | `data/*.pdf`, `data/*.txt` | 产品 FAQ、故障排除、维护保养、选购指南 |
@@ -143,6 +161,7 @@ flowchart TD
 ### 环境要求
 
 - Python 3.9+
+- Node.js 18+（React 前端）
 - DashScope API Key（阿里云通义千问）
 
 ### 安装
@@ -152,8 +171,11 @@ flowchart TD
 python -m venv ai-agent-venv
 source ai-agent-venv/bin/activate
 
-# 安装依赖
+# 安装 Python 依赖
 pip install -r requirement.txt
+
+# 安装前端依赖
+cd web/frontend && npm install && cd ../..
 ```
 
 ### 配置
@@ -164,22 +186,40 @@ pip install -r requirement.txt
 export DASHSCOPE_API_KEY="your-api-key-here"
 ```
 
-### 运行
+### 方式一：Streamlit UI
 
 ```bash
 streamlit run main.py
 ```
 
-浏览器访问 `http://localhost:8501` 即可开始对话。
+浏览器访问 `http://localhost:8501`。
+
+### 方式二：React + FastAPI（推荐）
+
+```bash
+# 终端 1：启动后端
+cd web/backend
+uvicorn main:app --host 0.0.0.0 --port 8000
+
+# 终端 2：启动前端
+cd web/frontend
+npx vite --host 0.0.0.0 --port 3000
+```
+
+浏览器访问 `http://localhost:3000`。
+
+> Vite 开发服务器会将 `/api` 请求代理到 `localhost:8000`。
 
 ### 用户体系
 
-- **注册**：在左侧边栏选择"注册"，设置用户名和密码
+- **注册**：在登录页面选择"注册"，设置用户名和密码
 - **角色**：注册时可选择"普通用户"或"管理员"
   - 普通用户：聊天功能
-  - 管理员：聊天 + 用户管理 + 知识库管理
+  - 管理员：聊天 + 用户管理 + 知识库管理 + 系统状态
 - **管理员验证码**：`admin888`（注册管理员时需要）
-- **登录持久化**：登录状态通过 URL 参数保持，刷新页面无需重新登录
+- **登录持久化**：
+  - Streamlit：通过 URL 参数保持
+  - React：通过 localStorage 保持
 
 ### 示例对话
 
@@ -222,23 +262,66 @@ ai-agent/
 │   └── vector_store.py          # ChromaDB 管理
 ├── utils/                       # 工具函数
 │   ├── chat_history_manager.py  # SQLite 会话管理，多用户，密码哈希
+│   ├── knowledge_manager.py     # 领域管理，知识条目 CRUD
+│   ├── file_watcher.py          # watchdog 文件监听，自动索引
 │   ├── config_handler.py
 │   ├── file_handler.py
 │   ├── logger_handler.py
 │   ├── path_tool.py
 │   └── prompt_loader.py
+├── web/                         # React + FastAPI 前后端
+│   ├── backend/                 # FastAPI 后端
+│   │   ├── main.py              # 应用入口
+│   │   ├── database.py          # SQLite 初始化，密码工具
+│   │   ├── models.py            # Pydantic 数据模型
+│   │   └── routers/
+│   │       ├── auth.py          # 注册/登录/用户管理 API
+│   │       ├── chat.py          # 会话 CRUD + SSE 流式对话
+│   │       └── admin.py         # 领域/知识库/文件/系统 API
+│   └── frontend/                # React 前端
+│       ├── vite.config.js       # Vite 配置，端口 3000，代理 /api
+│       ├── src/
+│       │   ├── App.jsx          # 根组件，登录态管理
+│       │   ├── main.jsx         # 入口
+│       │   ├── api/client.js    # API 客户端（含 SSE 流式）
+│       │   ├── pages/
+│       │   │   ├── Login.jsx    # 登录/注册页
+│       │   │   └── Chat.jsx     # 主聊天页（侧边栏 + 聊天 + 管理）
+│       │   ├── components/
+│       │   │   ├── Sidebar.jsx  # 会话列表，新建/重命名/删除
+│       │   │   ├── ChatArea.jsx # 消息渲染，流式输出，快速提问
+│       │   │   └── AdminPanel.jsx # 管理后台（5 个标签页）
+│       │   └── styles/
+│       │       └── globals.css  # Tailwind + 自定义动画
+│       └── index.html
 ├── data/                        # 知识库 & 外部数据
+│   ├── *.pdf, *.txt             # 默认领域知识文件
+│   ├── domains/                 # 其他领域知识文件
+│   │   └── <领域名>/
 │   ├── external/records.csv
-│   ├── 扫地机器人100问2.txt
-│   ├── 扫拖一体机器人100问.txt
-│   ├── 故障排除.txt
-│   ├── 维护保养.txt
-│   ├── 选购指南.txt
-│   └── chat_history.db          # SQLite 数据库（自动生成）
+│   ├── chat_history.db          # Streamlit SQLite（自动生成）
+│   └── knowledge.db             # Streamlit 知识库 SQLite（自动生成）
+├── web/backend/data/
+│   └── app.db                   # FastAPI SQLite（自动生成）
 ├── logs/                        # 运行日志
 ├── chroma_db/                   # 向量数据库持久化
+├── tests/                       # 测试
+│   ├── test_phase2.py           # 46 个自动化测试
+│   └── UI_TEST_CASES.md         # 25 个 UI 手动测试用例
 └── ai-agent-venv/               # 虚拟环境
 ```
+
+## 管理后台功能
+
+React 前端的管理后台包含 5 个标签页：
+
+| 标签 | 功能 |
+|------|------|
+| 用户管理 | 查看用户列表、修改角色、删除用户（禁止自删） |
+| 领域管理 | 创建/删除领域，每个领域独立的向量集合和 Prompt 模板 |
+| 知识库管理 | 按领域显示文件（磁盘扫描 + DB 记录）、上传/删除/索引 |
+| 知识条目 | 按领域管理知识条目（标题 + 内容） |
+| 系统状态 | 文件监听器（watchdog）启停控制 |
 
 ## 优化路线图
 
@@ -266,6 +349,7 @@ ai-agent/
 - ✅ 过滤中间工具调用阶段的消息（`tool_calls` / `tool_call_chunks`）
 - ✅ 只 yield 最终回答的文本内容给前端
 - ✅ Streamlit `st.write_stream` 实时渲染
+- ✅ React 前端通过 SSE（Server-Sent Events）实现流式渲染
 
 #### 1.3 会话历史持久化 ✅
 
@@ -276,6 +360,7 @@ ai-agent/
 - ✅ 支持会话切换、新建、删除
 - ✅ 登录状态通过 `st.query_params` 保持，刷新无需重新登录
 - ✅ 参考 LangGraph 的 `MemorySaver` / `SqliteSaver` 实现检查点机制
+- ✅ React 前端登录状态通过 localStorage 保持
 
 #### 1.4 向量检索调优 ✅
 
@@ -304,7 +389,7 @@ ai-agent/
 - ✅ 用户角色：`admin`（管理员）/ `user`（普通用户）
 - ✅ 每个用户拥有独立的对话历史（session isolation）
 - ✅ 管理员可管理用户（修改角色、删除用户）
-- ✅ 登录状态持久化（`st.query_params`）
+- ✅ 登录状态持久化（Streamlit: `st.query_params`，React: localStorage）
 - ⏳ 接入 OAuth2 / JWT 认证
 - ⏳ 偏好设置（语言风格、回答长度等）
 - ⏳ 个人设备数据绑定（扫地机器人 SN 码关联）
@@ -327,6 +412,8 @@ flowchart TD
     subgraph Admin["Admin 功能"]
         AD1["用户管理"]
         AD2["知识库管理"]
+        AD3["领域管理"]
+        AD4["系统状态"]
     end
 
     A1 --> A2
@@ -336,17 +423,18 @@ flowchart TD
     S2 --> S3
 ```
 
-#### 2.2 Admin 知识库管理后台 ✅ 基础版
+#### 2.2 Admin 知识库管理后台 ✅
 
 参考 Dify 的知识库管理模块：
 
 - ✅ Admin 登录后显示管理后台
 - ✅ 用户管理：查看用户列表、修改角色、删除用户
-- ✅ 知识库管理：查看已有文件、上传 PDF/TXT/MD 文件
+- ✅ 领域管理：创建/删除领域，每个领域独立向量集合与 Prompt 模板
+- ✅ 知识库管理：按领域显示文件（磁盘扫描 + DB 记录）、上传/删除/索引
+- ✅ 知识条目管理：按领域增删改查知识条目（标题 + 内容）
+- ✅ 系统状态：文件监听器（watchdog）启停控制
 - ⏳ 知识库版本管理（更新/回滚/对比）
 - ⏳ 查看知识库加载状态与 MD5 去重记录
-- ⏳ 按领域隔离向量集合（ChromaDB collection 按领域划分）
-- ⏳ 支持知识条目的增删改查（CRUD），而非仅限文件级操作
 - ⏳ 实现通用聊天机器人能力：
   - Admin 创建新领域（如 "智能家居"、"家电维修"、"汽车保养"）
   - 上传该领域资料后自动索引
@@ -380,12 +468,13 @@ flowchart TD
     PromptMgmt --> Agent
 ```
 
-#### 2.3 知识库实时更新
+#### 2.3 知识库实时更新 ✅
 
-- 监听 `data/` 目录变更（`watchdog`），新文件自动入库
-- 支持通过 API 动态添加/删除文档，无需重启服务
-- MD5 去重从文件迁移至 Redis，支持分布式部署
-- 参考 MetaGPT 的知识管理：支持文档的增量更新，而非全量重建
+- ✅ 监听 `data/` 目录变更（`watchdog`），新文件自动入库
+- ✅ 通过 Admin API 启停文件监听器
+- ⏳ 支持通过 API 动态添加/删除文档，无需重启服务
+- ⏳ MD5 去重从文件迁移至 Redis，支持分布式部署
+- ⏳ 参考 MetaGPT 的知识管理：支持文档的增量更新，而非全量重建
 
 ### Phase 3 - Agent 能力增强（中长期）
 
@@ -569,8 +658,9 @@ stateDiagram-v2
 | | 向量检索调优 | 2026-05 | ✅ Done |
 | | Agent 输出质量 | 2026-05 | ✅ Done |
 | **Phase 2 - 多用户与领域** | 多用户体系 | 2026-05 | ✅ Done |
-| | Admin 知识库管理 | 2026-05 | ✅ Done(基础版) |
-| | 知识库实时更新 | 待定 | ⏳ 待开始 |
+| | Admin 知识库管理 | 2026-05 | ✅ Done |
+| | 知识库实时更新 | 2026-05 | ✅ Done |
+| | React + FastAPI 前端 | 2026-05 | ✅ Done |
 | **Phase 3 - Agent 增强** | 多 Agent 协作 | 2026-08 ~ 09 | ⏳ 待开始 |
 | | 记忆系统升级 | 待定 | ⏳ 待开始 |
 | | 工具执行增强 | 待定 | ⏳ 待开始 |

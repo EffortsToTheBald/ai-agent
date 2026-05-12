@@ -6,3 +6,4 @@ dashscope
 pypdf
 streamlit
 requests
+watchdog

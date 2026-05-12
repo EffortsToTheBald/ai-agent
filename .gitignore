@@ -1,6 +1,11 @@
 ai-agent-venv/
-
+tests/*
 */__pycache__/
 *.pyc
 *.log
-chat_history.db
+data/*.db
+chroma_db/*
+web/frontend/node_modules/
+web/backend/chroma_db/*
+web/data/test*.txt
+data/test*.txt
